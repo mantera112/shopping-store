@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova Store</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+// React hooks we use: state, side effects (API call), and memoized values
+const { useState, useEffect, useMemo } = React;
+// Settings you can tweak: API URL, tax rate, free-shipping rule
+const API = "https://fakestoreapi.com/products";
+const TAX = 0.08, FREE_SHIPPING_OVER = 50, SHIPPING_FEE = 5.99;
+// Maps our 3 filter buttons to FakeStoreAPI category names (Clothing covers two)
+const GROUPS = { Electronics: ["electronics"], Jewelry: ["jewelery"], Clothing: ["men's clothing", "women's clothing"] };
+// Small inline SVG icons (no extra files needed). Use like <I n="lock" size={22} />
+const PATHS = {
+  user: <><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></>,
+  bag: <><path d="M5 8h14l-1 12H6L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></>,
+  trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>,
+  lock: <><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></>,
+  truck: <><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></>,
+  back: <><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></>,
+  search: <><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></>,
+};
+const I = ({ n, size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{PATHS[n]}</svg>
+);
+
+// Formats a number as dollars, e.g. 349 -> "$349.00"
+const money = n => "$" + n.toFixed(2);
+
+// FakeStoreAPI has no badges or discounts, so we add simulated ones to each product
+const decorate = p => ({
+  ...p,
+  badge: p.rating.rate >= 4 ? "Best Seller" : "New",
+  oldPrice: p.id % 3 === 0 ? null : +(p.price * (1 + (10 + (p.id % 4) * 5) / 100)).toFixed(2),
+});
+
+// Custom hook: works like useState but also saves the value in localStorage,
+// so the cart and wishlist survive a page refresh
+function useLocalState(key, initial) {
+  const [v, setV] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(key)) ?? initial; } catch { return initial; }
+  });
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }, [key, v]);
+  return [v, setV];
+}
+
+// One product card. It receives data and callbacks as props from App
+function Card({ p, onAdd, liked, onLike }) {
+  const off = p.oldPrice ? Math.round((1 - p.price / p.oldPrice) * 100) : 0;
+  return (
+    <article className="card">
+      <span className={"tag" + (p.badge === "New" ? " new" : "")}>{p.badge}</span>
+      <img src={p.image} alt={p.title} loading="lazy" />
+      <h3 className="title">{p.title}</h3>
+      <div className="stars">{"★".repeat(Math.round(p.rating.rate))} <small>{p.rating.rate} ({p.rating.count})</small></div>
+      <div className="price"><b>{money(p.price)}</b>{p.oldPrice && <><s>{money(p.oldPrice)}</s><em>{off}% OFF</em></>}</div>
+      <div className="row">
+        <button className="add" onClick={() => onAdd(p)}>Add to Cart</button>
+        <button className={"heart" + (liked ? " on" : "")} aria-label="Wishlist" onClick={() => onLike(p.id)}>{liked ? "♥" : "♡"}</button>
+      </div>
+    </article>
+  );
+}
+
+// Slide-out cart. All totals are derived from the cart array on every render,
+// so we never store them in state (avoids values getting out of sync)
+function CartDrawer({ open, onClose, cart, setQty, remove, onCheckout }) {
+  // Price math: shipping is free when subtotal reaches the threshold (or cart is empty)
+  const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  const shipping = subtotal === 0 || subtotal >= FREE_SHIPPING_OVER ? 0 : SHIPPING_FEE;
+  const tax = subtotal * TAX;
+  const total = subtotal + shipping + tax;
+  return (
+    <>
+      <div className={"overlay" + (open ? " open" : "")} onClick={onClose} />
+      <aside className={"drawer" + (open ? " open" : "")} aria-hidden={!open}>
+        <div className="dh"><h2>Shopping Cart</h2><button onClick={onClose} aria-label="Close cart">✕</button></div>
+        <div className="items">
+          {cart.length === 0 && <p className="state">Your cart is empty. Add something you like.</p>}
+          {cart.map(i => (
+            <div className="item" key={i.id}>
+              <img src={i.image} alt="" />
+              <div className="info">
+                <div>{i.title}</div><b>{money(i.price)}</b><br />
+                <div className="qty">
+                  <button onClick={() => setQty(i.id, i.qty - 1)} aria-label="Decrease">−</button>
+                  <span>{i.qty}</span>
+                  <button onClick={() => setQty(i.id, i.qty + 1)} aria-label="Increase">+</button>
+                </div>
+              </div>
+              <button className="iconbtn trash" onClick={() => remove(i.id)} aria-label="Remove item"><I n="trash" size={18} /></button>
+            </div>
+          ))}
+        </div>
+        <div className="sum">
+          <div><span>Subtotal</span><span>{money(subtotal)}</span></div>
+          <div><span>Shipping</span><span className={shipping ? "" : "free"}>{shipping ? money(shipping) : "Free"}</span></div>
+          <div><span>Tax (8%)</span><span>{money(tax)}</span></div>
+          <div className="tot"><span>Total</span><span>{money(total)}</span></div>
+        </div>
+        <button className="full main" disabled={!cart.length} onClick={() => onCheckout(total)}><span className="btnin"><I n="lock" size={18} /> Checkout</span></button>
+        <button className="full" onClick={onClose}>Continue Shopping</button>
+        {/* Trust badges, same as the design */}
+        <div className="trust">
+          <div><I n="lock" size={22} /><span><b>Secure Checkout</b><small>SSL Encrypted</small></span></div>
+          <div><I n="truck" size={22} /><span><b>Free Shipping</b><small>On orders over $50</small></span></div>
+          <div><I n="back" size={22} /><span><b>Easy Returns</b><small>Within 14 days</small></span></div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// Simulated checkout: validates the form, then shows a fake order number.
+// No real payment happens
+function CheckoutModal({ total, onClose, onConfirm }) {
+  const [done, setDone] = useState(null);
+  const [form, setForm] = useState({ name: "", email: "" });
+  const valid = form.name.trim() && /\S+@\S+\.\S+/.test(form.email);
+  const submit = e => {
+    e.preventDefault();
+    setDone("NS-" + Math.random().toString(36).slice(2, 8).toUpperCase());
+    onConfirm();
+  };
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="box" onClick={e => e.stopPropagation()}>
+        {done ? (
+          <>
+            <div className="ok">✓</div>
+            <h2>Order confirmed</h2>
+            <p style={{ color: "var(--mute)", margin: "10px 0 18px" }}>Order {done} · {money(total)}. A receipt is on its way to {form.email}.</p>
+            <button className="cta" onClick={onClose}>Back to store</button>
+          </>
+        ) : (
+          <form onSubmit={submit}>
+            <h2>Checkout</h2>
+            <p style={{ color: "var(--mute)", margin: "8px 0 14px" }}>Total: {money(total)}</p>
+            <input placeholder="Full name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+            <button className="full main" disabled={!valid}>Place order</button>
+            <button type="button" className="full" onClick={onClose}>Cancel</button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Root component: owns all the shared state and passes it down to children
+function App() {
+  const [products, setProducts] = useState([]);
+  const [status, setStatus] = useState("loading");
+  const [cat, setCat] = useState("All");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("featured");
+  const [cart, setCart] = useLocalState("nova-cart", []);
+  const [wish, setWish] = useLocalState("nova-wish", []);
+  const [open, setOpen] = useState(false);
+  const [checkout, setCheckout] = useState(null);
+
+  // Fetch products once on mount; 'status' drives the loading / error / ready UI
+  const load = () => {
+    setStatus("loading");
+    fetch(API).then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(d => { setProducts(d.map(decorate)); setStatus("ok"); })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, []);
+
+  // Filter by category + search text, then sort. useMemo recalculates only when these inputs change
+  const shown = useMemo(() => {
+    let list = products.filter(p =>
+      (cat === "All" || GROUPS[cat].includes(p.category)) &&
+      p.title.toLowerCase().includes(query.toLowerCase()));
+    if (sort === "low") list = [...list].sort((a, b) => a.price - b.price);
+    if (sort === "high") list = [...list].sort((a, b) => b.price - a.price);
+    if (sort === "rating") list = [...list].sort((a, b) => b.rating.rate - a.rating.rate);
+    return list;
+  }, [products, cat, query, sort]);
+
+  // Cart actions: add (or increase qty if already there), change quantity (below 1 removes), remove
+  const addToCart = p => { setCart(c => c.some(i => i.id === p.id) ? c.map(i => i.id === p.id ? { ...i, qty: i.qty + 1 } : i) : [...c, { id: p.id, title: p.title, price: p.price, image: p.image, qty: 1 }]); setOpen(true); };
+  const setQty = (id, q) => setCart(c => q < 1 ? c.filter(i => i.id !== id) : c.map(i => i.id === id ? { ...i, qty: q } : i));
+  const remove = id => setCart(c => c.filter(i => i.id !== id));
+  const toggleWish = id => setWish(w => w.includes(id) ? w.filter(x => x !== id) : [...w, id]);
+  const count = cart.reduce((s, i) => s + i.qty, 0);
+  const pick = c => { setCat(c); document.getElementById("shop").scrollIntoView({ behavior: "smooth" }); };
+
+  return (
+    <>
+      <header className="nav">
+        <div className="logo"><b>NOVA</b> STORE</div>
+        <label className="searchwrap"><I n="search" size={18} /><input className="search" placeholder="Search for products, brands and more..." value={query} onChange={e => setQuery(e.target.value)} /></label>
+        <nav className="links">
+          {["All", ...Object.keys(GROUPS)].map(c => <button key={c} className={cat === c ? "on" : ""} onClick={() => setCat(c)}>{c === "All" ? "All Products" : c}</button>)}
+        </nav>
+        <div className="actions">
+          <button className="iconbtn" aria-label="Profile"><I n="user" /></button>
+          <button className="iconbtn" onClick={() => setOpen(true)} aria-label="Open cart"><I n="bag" />{count > 0 && <span className="badge">{count}</span>}</button>
+        </div>
+      </header>
+
+      <section className="hero">
+        <div className="eyebrow"><span>Premium Quality</span><i /><span>Latest Tech</span><i /><span>Best Prices</span></div>
+        <h1>Everything you love.<br /><span>One better store.</span></h1>
+        <p>Discover premium gadgets, stylish clothing, elegant jewelry and more, all in one place.</p>
+        <button className="cta" onClick={() => pick("All")}>Explore collection</button>
+      </section>
+
+      <main id="shop">
+        <div className="bar">
+          <div className="heading"><h2>Featured Products</h2><p>Top picks, trending now and loved by our customers.</p></div>
+          <div className="pills">{["All", ...Object.keys(GROUPS)].map(c => <button key={c} className={"pill" + (cat === c ? " on" : "")} onClick={() => setCat(c)}>{c}</button>)}</div>
+          <select value={sort} onChange={e => setSort(e.target.value)} aria-label="Sort">
+            <option value="featured">Sort by: Featured</option>
+            <option value="low">Price: low to high</option>
+            <option value="high">Price: high to low</option>
+            <option value="rating">Top rated</option>
+          </select>
+        </div>
+        {status === "loading" && <p className="state">Loading products...</p>}
+        {status === "error" && <p className="state">Couldn't load products. <button className="pill" onClick={load}>Try again</button></p>}
+        {status === "ok" && shown.length === 0 && <p className="state">No products match your search.</p>}
+        <div className="grid">
+          {shown.map(p => <Card key={p.id} p={p} onAdd={addToCart} liked={wish.includes(p.id)} onLike={toggleWish} />)}
+        </div>
+      </main>
+
+      {/* Simple footer */}
+      <footer className="foot">
+        <div className="logo"><b style={{ color: "var(--accent)" }}>NOVA</b> STORE</div>
+        <nav>{Object.keys(GROUPS).map(c => <button key={c} onClick={() => pick(c)}>{c}</button>)}</nav>
+        <span>© {new Date().getFullYear()} Nova Store. All rights reserved.</span>
+      </footer>
+
+      <CartDrawer open={open} onClose={() => setOpen(false)} cart={cart} setQty={setQty} remove={remove}
+        onCheckout={t => { setOpen(false); setCheckout(t); }} />
+      {checkout !== null && <CheckoutModal total={checkout} onClose={() => setCheckout(null)} onConfirm={() => setCart([])} />}
+    </>
+  );
+}
+// Mount the app into <div id="root">
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
