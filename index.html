@@ -205,7 +205,7 @@ function App() {
           {["All", ...Object.keys(GROUPS)].map(c => <button key={c} className={cat === c ? "on" : ""} onClick={() => setCat(c)}>{c === "All" ? "All Products" : c}</button>)}
         </nav>
         <div className="actions">
-          <button className="iconbtn" aria-label="Profile"><I n="user" /></button>
+          <button className="iconbtn" aria-label="Profile"><a href="https://adisalem.netlify.app/"><I n="user" /></a></button>
           <button className="iconbtn" onClick={() => setOpen(true)} aria-label="Open cart"><I n="bag" />{count > 0 && <span className="badge">{count}</span>}</button>
         </div>
       </header>
